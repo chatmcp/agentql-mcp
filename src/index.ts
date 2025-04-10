@@ -3,6 +3,8 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import fetch from 'node-fetch';
+import { getParamValue, getAuthValue } from "@chatmcp/sdk/utils/index.js";
+import { RestServerTransport } from "@chatmcp/sdk/server/rest.js";
 
 // Interface for parsing AQL REST API response.
 interface AqlResponse {
@@ -23,12 +25,17 @@ const server = new Server(
 );
 
 const EXTRACT_TOOL_NAME = 'extract-web-data';
-const AGENTQL_API_KEY = process.env.AGENTQL_API_KEY;
+// const AGENTQL_API_KEY = process.env.AGENTQL_API_KEY;
 
-if (!AGENTQL_API_KEY) {
-  console.error('Error: AGENTQL_API_KEY environment variable is required');
-  process.exit(1);
-}
+// if (!AGENTQL_API_KEY) {
+//   console.error('Error: AGENTQL_API_KEY environment variable is required');
+//   process.exit(1);
+// }
+const agentqlApiKey = getParamValue("agentql_api_key") || "";
+ 
+const mode = getParamValue("mode") || "stdio";
+const port = getParamValue("port") || 9593;
+const endpoint = getParamValue("endpoint") || "/rest";
 
 // Handler that lists available tools.
 server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -59,6 +66,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 // Handler for the 'extract-web-data' tool.
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const apiKey = getAuthValue(request, "AGENTQL_API_KEY") || agentqlApiKey;
+  if (!apiKey) {
+    throw new Error("AGENTQL_API_KEY not set");
+  }
+
   switch (request.params.name) {
     case EXTRACT_TOOL_NAME: {
       const url = String(request.params.arguments?.url);
@@ -71,7 +83,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
-          'X-API-Key': `${AGENTQL_API_KEY}`,
+          'X-API-Key': `${apiKey}`,
           'X-TF-Request-Origin': 'mcp-server',
           'Content-Type': 'application/json',
         },
@@ -110,6 +122,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // Start the server using stdio transport.
 async function main() {
+  if (mode === "rest") {
+    const transport = new RestServerTransport({
+      port,
+      endpoint,
+    });
+    await server.connect(transport);
+
+    await transport.startServer();
+
+    return;
+  }
+  
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
